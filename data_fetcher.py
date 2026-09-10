@@ -8,6 +8,7 @@ from datetime import datetime
 
 class DataFetcher:
     def __init__(self, symbol=None, api_key_twelve=None):
+        # Menggunakan frxXAUUSD resmi dari Deriv
         self.symbol = "frxXAUUSD" 
         self.deriv_ws_url = "wss://ws.derivws.com/websockets/v3?app_id=1089"
         self.yahoo_base_url = "https://query1.finance.yahoo.com/v8/finance/chart"
