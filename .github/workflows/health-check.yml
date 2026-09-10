@@ -1,0 +1,83 @@
+name: Bot Health Monitor
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Setiap 30 menit
+  workflow_dispatch:
+
+jobs:
+  health-check:
+    name: Monitor Bot Status
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+      
+      - name: 🔍 Check Recent Workflow Runs
+        id: check
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const runs = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'trading-bot.yml',
+              per_page: 5
+            });
+            
+            const latestRun = runs.data.workflow_runs[0];
+            const lastRunTime = new Date(latestRun.created_at);
+            const hoursSinceLastRun = (Date.now() - lastRunTime.getTime()) / (1000 * 60 * 60);
+            
+            console.log(`Last run: ${latestRun.status} at ${lastRunTime.toISOString()}`);
+            console.log(`Hours since last run: ${hoursSinceLastRun.toFixed(2)}`);
+            
+            core.setOutput('last_status', latestRun.status);
+            core.setOutput('hours_since', hoursSinceLastRun.toFixed(2));
+            core.setOutput('should_restart', hoursSinceLastRun > 6 ? 'true' : 'false');
+      
+      - name: 🔄 Restart Bot If Needed
+        if: steps.check.outputs.should_restart == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            console.log('⚠️ Bot inactive for too long, triggering restart...');
+            
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'trading-bot.yml',
+              ref: 'main'
+            });
+      
+      - name: 📢 Alert on Failure
+        if: steps.check.outputs.last_status == 'failure'
+        run: |
+          python -c "
+          import requests
+          import os
+          
+          token = '${{ secrets.TELEGRAM_BOT_TOKEN }}'
+          chat_id = '${{ secrets.TELEGRAM_CHAT_ID }}'
+          
+          message = '''
+          ⚠️ *PERINGATAN BOT TRADING*
+          
+          Status: GAGAL
+          Waktu: ''' + __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '''
+          
+          Bot akan restart otomatis
+          '''
+          
+          try:
+              requests.post(
+                  f'https://api.telegram.org/bot{token}/sendMessage',
+                  data={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'},
+                  timeout=10
+              )
+          except Exception as e:
+              print(f'Alert error: {e}')
+          "
