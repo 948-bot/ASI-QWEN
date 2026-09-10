@@ -26,7 +26,6 @@ class SignalGenerator:
             elif latest_15m['ema_short'] < latest_15m['ema_long']:
                 mtf_trend = 'bearish'
 
-        # Fokus evaluasi terstruktur untuk menghindari konflik arah sinyal
         target_timeframes = ['15m', '5m']
         
         for timeframe in target_timeframes:
@@ -36,14 +35,11 @@ class SignalGenerator:
             df = analysis_data[timeframe]
             signal = self._analyze_timeframe(df, timeframe, mtf_trend, dxy_trend)
             if signal:
-                # Cegah sinyal yang berlawanan arah dalam cycle yang sama
                 if signals and signals[0]['type'] != signal['type']:
                     continue
                 signals.append(signal)
                 
         signals.sort(key=lambda x: x['confidence'], reverse=True)
-        
-        # Batasi maksimal hanya 1 sinyal terkuat per cycle agar tidak konflik & akurat
         return signals[:1]
 
     def _analyze_timeframe(self, df, timeframe, mtf_trend, dxy_trend):
@@ -71,23 +67,22 @@ class SignalGenerator:
             score += 15
             
         # 3. Intermarket Correlation (DXY)
-        # Emas berbanding terbalik dengan Dolar
         if dxy_trend == 'bearish' and signal_type == 'BUY':
-            score += 20 # Dolar lemah, Emas kuat
+            score += 20
         elif dxy_trend == 'bullish' and signal_type == 'SELL':
-            score += 20 # Dolar kuat, Emas lemah
+            score += 20
         elif dxy_trend == 'bullish' and signal_type == 'BUY':
-            score -= 30 # Kontradiksi makro, batalkan BUY
+            score -= 30
         elif dxy_trend == 'bearish' and signal_type == 'SELL':
-            score -= 30 # Kontradiksi makro, batalkan SELL
+            score -= 30
             
-        # 4. MTF Confluence
-        if self.config.USE_MTF_CONFLUENCE:
+        # 4. MTF Confluence (AMAN DARI NONETYPE ERROR)
+        if self.config.USE_MTF_CONFLUENCE and signal_type is not None:
             if mtf_trend == 'bullish' and signal_type == 'BUY':
                 score += 15
             elif mtf_trend == 'bearish' and signal_type == 'SELL':
                 score += 15
-            elif mtf_trend != signal_type.lower() and signal_type is not None:
+            elif mtf_trend != signal_type.lower():
                 score -= 20
                 
         # 5. Standard Indicators (RSI & MACD)
