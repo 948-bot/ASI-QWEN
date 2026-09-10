@@ -8,8 +8,8 @@ class Config:
     TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
     TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
     
-    # Trading Configuration
-    PAXG_SYMBOL = os.getenv('PAXG_SYMBOL', 'XAUUSDT')
+    # Trading Configuration - GANTI KE PAXGUSDT
+    PAXG_SYMBOL = os.getenv('PAXG_SYMBOL', 'PAXGUSDT')  # PAXGUSDT tersedia di Binance Spot
     UPDATE_INTERVAL = int(os.getenv('UPDATE_INTERVAL', 60))
     RISK_LEVEL = os.getenv('RISK_LEVEL', 'medium')
     MAX_SIGNALS_PER_HOUR = int(os.getenv('MAX_SIGNALS_PER_HOUR', 10))
