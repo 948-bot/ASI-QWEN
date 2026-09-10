@@ -26,17 +26,25 @@ class SignalGenerator:
             elif latest_15m['ema_short'] < latest_15m['ema_long']:
                 mtf_trend = 'bearish'
 
-        for timeframe in ['5m', '15m']:
+        # Fokus evaluasi terstruktur untuk menghindari konflik arah sinyal
+        target_timeframes = ['15m', '5m']
+        
+        for timeframe in target_timeframes:
             if timeframe not in analysis_data or analysis_data[timeframe] is None:
                 continue
                 
             df = analysis_data[timeframe]
             signal = self._analyze_timeframe(df, timeframe, mtf_trend, dxy_trend)
             if signal:
+                # Cegah sinyal yang berlawanan arah dalam cycle yang sama
+                if signals and signals[0]['type'] != signal['type']:
+                    continue
                 signals.append(signal)
                 
         signals.sort(key=lambda x: x['confidence'], reverse=True)
-        return signals[:2]
+        
+        # Batasi maksimal hanya 1 sinyal terkuat per cycle agar tidak konflik & akurat
+        return signals[:1]
 
     def _analyze_timeframe(self, df, timeframe, mtf_trend, dxy_trend):
         latest = df.iloc[-1]
