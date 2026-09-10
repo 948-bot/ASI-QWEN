@@ -2,7 +2,7 @@ name: Bot Health Monitor
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Setiap 30 menit
+    - cron: '*/30 * * * *'
   workflow_dispatch:
 
 jobs:
@@ -20,54 +20,106 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const runs = await github.rest.actions.listWorkflowRuns({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'trading-bot.yml',
-              per_page: 5
-            });
-            
-            const latestRun = runs.data.workflow_runs[0];
-            const lastRunTime = new Date(latestRun.created_at);
-            const hoursSinceLastRun = (Date.now() - lastRunTime.getTime()) / (1000 * 60 * 60);
-            
-            console.log(`Last run: ${latestRun.status} at ${lastRunTime.toISOString()}`);
-            console.log(`Hours since last run: ${hoursSinceLastRun.toFixed(2)}`);
-            
-            core.setOutput('last_status', latestRun.status);
-            core.setOutput('hours_since', hoursSinceLastRun.toFixed(2));
-            core.setOutput('should_restart', hoursSinceLastRun > 6 ? 'true' : 'false');
+            try {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'trading-bot.yml',
+                per_page: 5
+              });
+              
+              const workflowRuns = runs.data.workflow_runs || [];
+              
+              // Jika belum ada run sama sekali
+              if (workflowRuns.length === 0) {
+                console.log('ℹ️ No workflow runs found yet - this is normal for first run');
+                core.setOutput('last_status', 'none');
+                core.setOutput('hours_since', '0');
+                core.setOutput('should_restart', 'false');
+                core.setOutput('run_count', '0');
+                return;
+              }
+              
+              const latestRun = workflowRuns[0];
+              
+              // Validasi created_at ada
+              if (!latestRun.created_at) {
+                console.log('⚠️ Latest run missing created_at timestamp');
+                core.setOutput('last_status', 'unknown');
+                core.setOutput('hours_since', '0');
+                core.setOutput('should_restart', 'false');
+                core.setOutput('run_count', workflowRuns.length.toString());
+                return;
+              }
+              
+              const lastRunTime = new Date(latestRun.created_at);
+              const hoursSinceLastRun = (Date.now() - lastRunTime.getTime()) / (1000 * 60 * 60);
+              
+              console.log(`📊 Total runs found: ${workflowRuns.length}`);
+              console.log(`Last run: ${latestRun.status} at ${lastRunTime.toISOString()}`);
+              console.log(`Hours since last run: ${hoursSinceLastRun.toFixed(2)}`);
+              console.log(`Run ID: ${latestRun.id}`);
+              
+              core.setOutput('last_status', latestRun.status || 'unknown');
+              core.setOutput('hours_since', hoursSinceLastRun.toFixed(2));
+              core.setOutput('should_restart', hoursSinceLastRun > 6 ? 'true' : 'false');
+              core.setOutput('run_count', workflowRuns.length.toString());
+              
+            } catch (error) {
+              console.log(`⚠️ Error checking workflow runs: ${error.message}`);
+              console.log('This is normal if workflow has never run before');
+              core.setOutput('last_status', 'error');
+              core.setOutput('hours_since', '0');
+              core.setOutput('should_restart', 'false');
+              core.setOutput('run_count', '0');
+            }
+      
+      - name: 🚀 Initial Setup
+        if: steps.check.outputs.run_count == '0'
+        run: |
+          echo "🚀 First run detected - bot will start on next schedule"
+          echo "ℹ️ This is normal for new deployments"
       
       - name: 🔄 Restart Bot If Needed
-        if: steps.check.outputs.should_restart == 'true'
+        if: steps.check.outputs.should_restart == 'true' && steps.check.outputs.last_status != 'none'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             console.log('⚠️ Bot inactive for too long, triggering restart...');
             
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'trading-bot.yml',
-              ref: 'main'
-            });
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'trading-bot.yml',
+                ref: 'main'
+              });
+              console.log('✅ Restart triggered successfully');
+            } catch (error) {
+              console.log(`❌ Failed to trigger restart: ${error.message}`);
+              console.log('This might be due to permissions - check Settings → Actions → General');
+            }
       
       - name: 📢 Alert on Failure
         if: steps.check.outputs.last_status == 'failure'
         run: |
           python -c "
           import requests
-          import os
+          from datetime import datetime
           
           token = '${{ secrets.TELEGRAM_BOT_TOKEN }}'
           chat_id = '${{ secrets.TELEGRAM_CHAT_ID }}'
           
-          message = '''
+          if not token or not chat_id:
+              print('⚠️ Telegram credentials not set')
+              exit(0)
+          
+          message = f'''
           ⚠️ *PERINGATAN BOT TRADING*
           
           Status: GAGAL
-          Waktu: ''' + __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '''
+          Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
           
           Bot akan restart otomatis
           '''
@@ -78,6 +130,17 @@ jobs:
                   data={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'},
                   timeout=10
               )
+              print('✅ Alert sent successfully')
           except Exception as e:
               print(f'Alert error: {e}')
           "
+      
+      - name: 📊 Health Summary
+        run: |
+          echo "🏥 Health Check Summary"
+          echo "======================"
+          echo "Status: ${{ steps.check.outputs.last_status }}"
+          echo "Hours Since Last Run: ${{ steps.check.outputs.hours_since }}"
+          echo "Total Runs: ${{ steps.check.outputs.run_count }}"
+          echo "Should Restart: ${{ steps.check.outputs.should_restart }}"
+          echo "======================"
