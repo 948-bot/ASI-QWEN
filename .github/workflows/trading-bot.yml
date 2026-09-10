@@ -2,9 +2,8 @@ name: XAUUSD Trading Bot 24/5
 
 on:
   schedule:
-    # Jalankan setiap 5 jam (sebelum timeout 6 jam GitHub Actions)
-    - cron: '0 */5 * * 1-5'  # Senin-Jumat setiap 5 jam
-    - cron: '0 0 * * 6'       # Sabtu midnight
+    - cron: '0 */5 * * 1-5'
+    - cron: '0 0 * * 6'
   workflow_dispatch:
     inputs:
       force_restart:
@@ -15,14 +14,14 @@ on:
     types: [restart-bot]
 
 env:
-  PYTHON_VERSION: '3.10'
-  BOT_TIMEOUT: 17000  # 4.7 jam (sebelum 6 jam timeout)
+  PYTHON_VERSION: '3.11'
+  BOT_TIMEOUT: 17000
 
 jobs:
   trading-bot:
     name: Run Trading Bot
     runs-on: ubuntu-latest
-    timeout-minutes: 300  # 5 jam max
+    timeout-minutes: 300
     
     steps:
       - name: 📥 Checkout Repository
@@ -70,7 +69,7 @@ jobs:
         run: |
           echo "🚀 Starting trading bot at $(date)"
           timeout ${{ env.BOT_TIMEOUT }} python main.py 2>&1 | tee logs/bot.log || EXIT_CODE=$?
-          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "exit_code=${EXIT_CODE:-0}" >> $GITHUB_OUTPUT
           echo "✅ Bot execution completed"
       
       - name: 📊 Upload Logs
@@ -83,14 +82,6 @@ jobs:
             data/
           retention-days: 7
       
-      - name: 🔄 Auto-Restart Bot
-        if: always() && github.event_name != 'workflow_dispatch'
-        run: |
-          echo "🔄 Triggering restart for continuous operation..."
-          python restart_helper.py
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
       - name: 📢 Notify on Completion
         if: always()
         run: |
@@ -101,6 +92,10 @@ jobs:
           
           token = '${{ secrets.TELEGRAM_BOT_TOKEN }}'
           chat_id = '${{ secrets.TELEGRAM_CHAT_ID }}'
+          
+          if not token or not chat_id:
+              print('⚠️ Telegram credentials not set')
+              exit(0)
           
           status = '✅ Berhasil' if '${{ steps.run_bot.outputs.exit_code }}' == '0' else '⚠️ Restart'
           message = f'''
@@ -124,21 +119,24 @@ jobs:
           "
       
       - name: 🔄 Trigger Next Run
-        if: always()
+        if: always() && github.event_name != 'workflow_dispatch'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // Schedule next run in 5 hours
             const nextRun = new Date(Date.now() + 5 * 60 * 60 * 1000);
             console.log(`Next scheduled run: ${nextRun.toISOString()}`);
             
-            // Trigger workflow restart
-            await github.rest.repos.createDispatchEvent({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              event_type: 'restart-bot'
-            });
+            try {
+              await github.rest.repos.createDispatchEvent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                event_type: 'restart-bot'
+              });
+              console.log('✅ Dispatch event created');
+            } catch (error) {
+              console.log(`⚠️ Failed to create dispatch: ${error.message}`);
+            }
 
   health-check:
     name: Health Check
@@ -147,13 +145,100 @@ jobs:
     if: always()
     
     steps:
-      - name: 🏥 Check Bot Health
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+      
+      - name: 🔍 Check Recent Workflow Runs
+        id: check
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'trading-bot.yml',
+                per_page: 5
+              });
+              
+              const workflowRuns = runs.data.workflow_runs || [];
+              
+              if (workflowRuns.length === 0) {
+                console.log('ℹ️ No workflow runs found yet');
+                core.setOutput('last_status', 'none');
+                core.setOutput('hours_since', '0');
+                core.setOutput('should_restart', 'false');
+                return;
+              }
+              
+              const latestRun = workflowRuns[0];
+              const lastRunTime = new Date(latestRun.created_at);
+              const hoursSinceLastRun = (Date.now() - lastRunTime.getTime()) / (1000 * 60 * 60);
+              
+              console.log(`Last run: ${latestRun.status} at ${lastRunTime.toISOString()}`);
+              console.log(`Hours since last run: ${hoursSinceLastRun.toFixed(2)}`);
+              
+              core.setOutput('last_status', latestRun.status || 'unknown');
+              core.setOutput('hours_since', hoursSinceLastRun.toFixed(2));
+              core.setOutput('should_restart', hoursSinceLastRun > 6 ? 'true' : 'false');
+              
+            } catch (error) {
+              console.log(`⚠️ Error checking workflow runs: ${error.message}`);
+              core.setOutput('last_status', 'error');
+              core.setOutput('hours_since', '0');
+              core.setOutput('should_restart', 'false');
+            }
+      
+      - name: 🔄 Restart Bot If Needed
+        if: steps.check.outputs.should_restart == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            console.log('⚠️ Bot inactive for too long, triggering restart...');
+            
+            try {
+              await github.rest.actions.createWorkflowDispatch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'trading-bot.yml',
+                ref: 'main'
+              });
+              console.log('✅ Restart triggered successfully');
+            } catch (error) {
+              console.log(`❌ Failed to trigger restart: ${error.message}`);
+            }
+      
+      - name: 📢 Alert on Failure
+        if: steps.check.outputs.last_status == 'failure'
         run: |
-          echo "🏥 Performing health check..."
-          echo "Previous job status: ${{ needs.trading-bot.result }}"
+          python -c "
+          import requests
+          from datetime import datetime
           
-          if [ "${{ needs.trading-bot.result }}" == "failure" ]; then
-            echo "❌ Bot failed, will restart on next schedule"
-          else
-            echo "✅ Bot running normally"
-          fi
+          token = '${{ secrets.TELEGRAM_BOT_TOKEN }}'
+          chat_id = '${{ secrets.TELEGRAM_CHAT_ID }}'
+          
+          if not token or not chat_id:
+              print('⚠️ Telegram credentials not set')
+              exit(0)
+          
+          message = '''
+          ⚠️ *PERINGATAN BOT TRADING*
+          
+          Status: GAGAL
+          Waktu: ''' + datetime.now().strftime('%Y-%m-%d %H:%M:%S') + '''
+          
+          Bot akan restart otomatis
+          '''
+          
+          try:
+              requests.post(
+                  f'https://api.telegram.org/bot{token}/sendMessage',
+                  data={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'},
+                  timeout=10
+              )
+          except Exception as e:
+              print(f'Alert error: {e}')
+          "
