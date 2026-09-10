@@ -2,8 +2,8 @@ import asyncio
 import sys
 import signal
 import time
-import os
 from datetime import datetime
+
 from config import Config
 from data_fetcher import DataFetcher
 from technical_analyzer import TechnicalAnalyzer
@@ -24,30 +24,6 @@ class TradingBot:
         self.learner = SelfLearning(self.config)
         self.running = True
         self.cycle_count = 0
-
-async def _github_actions_setup(self):
-    """Setup khusus untuk GitHub Actions"""
-    if self.config.IS_GITHUB_ACTIONS:
-        print("\n" + "=" * 60)
-        print("🐙 GITHUB ACTIONS MODE")
-        print("=" * 60)
-        print(f"Run ID: {self.config.GITHUB_RUN_ID}")
-        print(f"Repository: {self.config.GITHUB_REPOSITORY}")
-        print("=" * 60)
-        
-        # Create necessary directories
-        os.makedirs(self.config.DATA_DIR, exist_ok=True)
-        os.makedirs(self.config.LOG_DIR, exist_ok=True)
-        
-        # Send startup notification with GitHub info
-        await self.notifier.send_notification(
-            "🐙 *BOT DIMULAI DI GITHUB ACTIONS*\n\n"
-            f"Run ID: {self.config.GITHUB_RUN_ID}\n"
-            f"Symbol: {self.config.PAXG_SYMBOL}\n"
-            f"Timeframes: {', '.join(self.config.TIMEFRAMES)}\n"
-            f"Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-
         
     async def start(self):
         """Start the trading bot"""
@@ -73,7 +49,7 @@ async def _github_actions_setup(self):
                 await self._run_cycle()
                 self.cycle_count += 1
                 
-                # Periodic tasks
+                # Periodic tasks every 10 cycles
                 if self.cycle_count % 10 == 0:
                     await self._periodic_tasks()
                 
@@ -117,7 +93,7 @@ async def _github_actions_setup(self):
             for signal in signals:
                 await self._process_signal(signal)
         else:
-            print("ℹ️ Tidak ada sinyal valid")
+            print("️ Tidak ada sinyal valid")
     
     async def _process_signal(self, signal):
         """Process and send a signal"""
@@ -127,7 +103,7 @@ async def _github_actions_setup(self):
         # Send to Telegram
         await self.notifier.send_signal(signal)
         
-        print(f"📤 Signal {signal['type']} dikirim | Confidence: {signal['confidence']}%")
+        print(f" Signal {signal['type']} dikirim | Confidence: {signal['confidence']}%")
     
     async def _periodic_tasks(self):
         """Run periodic maintenance tasks"""
