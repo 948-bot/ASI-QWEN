@@ -19,7 +19,7 @@ class DataFetcher:
     async def fetch_klines(self, interval='5m', limit=100):
         cache_key = f"DERIV_{self.symbol}_{interval}"
         
-        if cache_key in self.last_fetch and (time.time() - self.last_fetch[cache_key] < 15): # Dipercepat cache-nya jadi 15 detik
+        if cache_key in self.last_fetch and (time.time() - self.last_fetch[cache_key] < 15):
             return self.cache.get(cache_key)
         
         granularity = 300 if interval in ['5m', '5min'] else 900
@@ -50,6 +50,7 @@ class DataFetcher:
                         if df is not None and not df.empty:
                             self.cache[cache_key] = df
                             self.last_fetch[cache_key] = time.time()
+                            print(f"✅ Data DXY (Indeks Dolar) berhasil diambil untuk korelasi makro")
                             return df
         except Exception as e:
             print(f"⚠️ Gagal mengambil data DXY: {e}")
@@ -99,8 +100,6 @@ class DataFetcher:
     def _parse_deriv_candles(self, candles_data, granularity):
         if not candles_data: return None
         
-        # Deriv biasanya mengirim data dari yang terlama ke terbaru. 
-        # Jika diurutkan ke bawah, pastikan indeks terakhir adalah candle yang sedang berjalan (live).
         df = pd.DataFrame(candles_data)
         df = df.rename(columns={'epoch': 'open_time', 'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close'})
         df['open_time'] = pd.to_datetime(df['open_time'], unit='s')
