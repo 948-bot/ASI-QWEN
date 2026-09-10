@@ -50,7 +50,7 @@ class RestartHelper:
                 print(f"❌ Workflow not found - check if trading-bot.yml exists")
                 return False
             elif response.status_code == 403:
-                print(f"❌ Permission denied - check GITHUB_TOKEN permissions")
+                print(f" Permission denied - check GITHUB_TOKEN permissions")
                 print("   Go to Settings → Actions → General → Workflow permissions")
                 print("   Set to 'Read and write permissions'")
                 return False
@@ -60,7 +60,7 @@ class RestartHelper:
                 return False
                 
         except requests.exceptions.Timeout:
-            print("❌ Request timeout")
+            print(" Request timeout")
             return False
         except requests.exceptions.ConnectionError:
             print("❌ Connection error")
