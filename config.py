@@ -1,7 +1,6 @@
 import os
 from dotenv import load_dotenv
 
-# Load .env file
 load_dotenv()
 
 class Config:
@@ -10,7 +9,7 @@ class Config:
     TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
     
     # Trading Configuration
-    PAXG_SYMBOL = os.getenv('PAXG_SYMBOL', 'PAXGUSDT')
+    PAXG_SYMBOL = os.getenv('PAXG_SYMBOL', 'XAUUSDT')
     UPDATE_INTERVAL = int(os.getenv('UPDATE_INTERVAL', 60))
     RISK_LEVEL = os.getenv('RISK_LEVEL', 'medium')
     MAX_SIGNALS_PER_HOUR = int(os.getenv('MAX_SIGNALS_PER_HOUR', 10))
@@ -29,10 +28,15 @@ class Config:
     BOLLINGER_STD = 2
     EMA_SHORT = 9
     EMA_LONG = 21
+    ATR_PERIOD = 14
     
-    # Risk Management
-    STOP_LOSS_PERCENT = 2.0
-    TAKE_PROFIT_PERCENT = 4.0
+    # Risk Management - Dynamic with ATR
+    ATR_MULTIPLIER_SL = float(os.getenv('ATR_MULTIPLIER_SL', 1.5))
+    ATR_MULTIPLIER_TP = float(os.getenv('ATR_MULTIPLIER_TP', 3.0))
+    
+    # Filters
+    USE_NEWS_FILTER = os.getenv('USE_NEWS_FILTER', 'true').lower() == 'true'
+    USE_MTF_CONFLUENCE = os.getenv('USE_MTF_CONFLUENCE', 'true').lower() == 'true'
     
     # Self-Learning
     LEARNING_RATE = 0.01
@@ -40,7 +44,6 @@ class Config:
     
     # Anti-Spam
     MIN_SIGNAL_INTERVAL = 300  # 5 minutes between signals
-    SIGNAL_COOLDOWN = {}
     
     # GitHub Actions Configuration
     IS_GITHUB_ACTIONS = os.getenv('GITHUB_ACTIONS', 'false').lower() == 'true'
@@ -50,6 +53,9 @@ class Config:
     # Data persistence
     DATA_DIR = 'data'
     LOG_DIR = 'logs'
+    
+    # News Filter Times (UTC) - High impact news hours
+    NEWS_BLACKOUT_HOURS = [13, 14, 19, 20]  # 13:30, 14:00, 19:30, 20:00 UTC
     
     @classmethod
     def validate(cls):
