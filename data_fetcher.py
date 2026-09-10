@@ -1,15 +1,15 @@
 import pandas as pd
 import asyncio
-import aiohttp
+import websockets
+import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 class DataFetcher:
     def __init__(self, symbol=None, api_key_twelve=None):
-        # Kita pakai PAXG-USD dari Coinbase
-        self.symbol = "PAXG-USD"
-        self.coinbase_candles_url = "https://api.exchange.coinbase.com/products/PAXG-USD/candles"
-        self.coinbase_spot_url = "https://api.coinbase.com/v2/prices/PAXG-USD/spot"
+        # frxXAUUSD adalah simbol Gold Forex di Deriv (Sangat dekat dengan MT5)
+        self.symbol = "frxXAUUSD" 
+        self.deriv_ws_url = "wss://ws.derivws.com/websockets/v3?app_id=1089" # 1089 adalah App ID Publik Gratis
         
         self.cache = {}
         self.last_fetch = {}
@@ -17,10 +17,10 @@ class DataFetcher:
         
     async def fetch_klines(self, interval='5m', limit=100):
         """
-        Fetch data candlestick dari Coinbase Public API
-        100% GRATIS, TANPA API KEY, TANPA AUTH
+        Fetch data candlestick dari Deriv Public WebSocket API
+        100% GRATIS, TANPA API KEY, MENGGUNAKAN App ID Publik (1089)
         """
-        cache_key = f"PAXGUSD_{interval}"
+        cache_key = f"DERIV_{self.symbol}_{interval}"
         
         # Check cache (hindari request terlalu sering, max 1x per 30 detik)
         if cache_key in self.last_fetch:
@@ -28,97 +28,114 @@ class DataFetcher:
             if time_since < 30:
                 return self.cache.get(cache_key)
         
-        # Map interval ke granularity Coinbase (dalam detik)
-        # 60=1m, 300=5m, 900=15m, 3600=1h, 21600=6h, 86400=1d
+        # Map interval ke detik (Granularity Deriv)
+        # 60=1m, 300=5m, 900=15m, 3600=1h, 86400=1d
         granularity = 300 if interval in ['5m', '5min'] else 900
         
-        df = await self._fetch_from_coinbase_candles(granularity, limit)
+        df = await self._fetch_from_deriv_ws(granularity, limit)
         
         if df is not None and not df.empty:
-            self.last_success_source[cache_key] = 'coinbase_candles'
+            self.last_success_source[cache_key] = 'deriv_ws'
             self.cache[cache_key] = df
             self.last_fetch[cache_key] = time.time()
-            print(f"✅ Data Candlestick berhasil diambil dari Coinbase (PAXG-USD) - GRATIS")
+            print(f"✅ Data Candlestick berhasil diambil dari Deriv ({self.symbol}) - GRATIS & AKURAT")
             return df
         
-        print(f"⚠️ Gagal ambil data candle, menggunakan cache terakhir")
+        print(f"⚠️ Gagal ambil data dari Deriv, menggunakan cache terakhir")
         return self.cache.get(cache_key)
     
-    async def _fetch_from_coinbase_candles(self, granularity, limit):
-        """Fetch historical candles dari Coinbase Exchange API (Public)"""
+    async def _fetch_from_deriv_ws(self, granularity, limit):
+        """Fetch historical candles dari Deriv WebSocket"""
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json',
+            # Payload request sesuai dokumentasi API Deriv
+            payload = {
+                "ticks_history": self.symbol,
+                "adjust_start_time": 1,
+                "count": limit,
+                "end": "latest",
+                "start": 1,
+                "style": "candles",
+                "granularity": granularity
             }
             
-            async with aiohttp.ClientSession(headers=headers) as session:
-                params = {
-                    'granularity': granularity,
-                    'limit': limit
-                }
+            # Connect ke WebSocket Deriv (Timeout 15 detik)
+            async with websockets.connect(self.deriv_ws_url, ping_interval=None) as ws:
+                await ws.send(json.dumps(payload))
                 
-                async with session.get(self.coinbase_candles_url, params=params, timeout=aiohttp.ClientTimeout(total=15)) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        df = self._parse_coinbase_candles(data, granularity)
-                        return df
-                    else:
-                        print(f"⚠️ Coinbase Candles HTTP {response.status}")
-                        
+                # Tunggu response
+                response_str = await asyncio.wait_for(ws.recv(), timeout=15.0)
+                response = json.loads(response_str)
+                
+                # Cek jika ada error dari Deriv
+                if "error" in response:
+                    print(f"⚠️ Deriv API Error: {response['error']['message']}")
+                    return None
+                
+                # Parse data candles
+                if "candles" in response:
+                    df = self._parse_deriv_candles(response["candles"], granularity)
+                    return df
+                else:
+                    print("⚠️ Deriv response tidak mengandung data candles")
+                    return None
+                    
         except asyncio.TimeoutError:
-            print(f"⚠️ Coinbase Candles timeout")
+            print(f"⚠️ Deriv WebSocket timeout")
+        except websockets.exceptions.WebSocketException as e:
+            print(f"⚠️ Deriv WebSocket connection error: {e}")
         except Exception as e:
-            print(f"⚠️ Coinbase Candles error: {e}")
+            print(f"⚠️ Deriv fetch error: {e}")
         
         return None
     
-    def _parse_coinbase_candles(self, data, granularity):
-        """
-        Parse data dari Coinbase.
-        Format Coinbase: [time, low, high, open, close, volume]
-        """
-        if not data:
+    def _parse_deriv_candles(self, candles_data, granularity):
+        """Parse data dari Deriv ke DataFrame Pandas"""
+        if not candles_data:
             return None
         
-        # Coinbase mengembalikan data dari TERBARU ke TERLAMA, kita harus reverse
-        data.reverse()
+        # Deriv mengembalikan data dari TERLAMA ke TERBARU (sudah urut, bagus!)
+        df = pd.DataFrame(candles_data)
         
-        df = pd.DataFrame(data, columns=['time', 'low', 'high', 'open', 'close', 'volume'])
+        # Rename kolom agar sesuai dengan format bot kita
+        # Deriv: epoch, open, high, low, close
+        df = df.rename(columns={'epoch': 'open_time'})
         
-        # Convert time (Unix timestamp) to datetime
-        df['open_time'] = pd.to_datetime(df['time'], unit='s')
+        # Convert epoch (unix timestamp) ke datetime
+        df['open_time'] = pd.to_datetime(df['open_time'], unit='s')
         df['close_time'] = df['open_time'] + pd.Timedelta(seconds=granularity)
         
-        # Convert columns to numeric
+        # Pastikan kolom volume ada (Deriv kadang tidak kirim volume untuk forex, kita isi 0)
+        if 'volume' not in df.columns:
+            df['volume'] = 0
+            
+        # Convert ke numeric
         for col in ['open', 'high', 'low', 'close', 'volume']:
             df[col] = pd.to_numeric(df[col], errors='coerce')
         
-        # Drop any NaN rows
+        # Drop NaN
         df = df.dropna()
-        
-        # Urutkan berdasarkan waktu
-        df = df.sort_values('open_time').reset_index(drop=True)
         
         return df
     
     async def fetch_current_price(self):
-        """Ambil harga current dari Coinbase Spot API (URL yang Anda berikan)"""
+        """Ambil harga current (tick terakhir) dari Deriv"""
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                'Accept': 'application/json',
+            payload = {
+                "ticks": self.symbol,
+                "subscribe": 0
             }
             
-            async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(self.coinbase_spot_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        price = float(data['data']['amount'])
-                        print(f"💰 Current PAXG-USD Price: ${price:.2f} (Source: Coinbase Spot)")
-                        return price
+            async with websockets.connect(self.deriv_ws_url, ping_interval=None) as ws:
+                await ws.send(json.dumps(payload))
+                response_str = await asyncio.wait_for(ws.recv(), timeout=10.0)
+                response = json.loads(response_str)
+                
+                if "tick" in response and "quote" in response["tick"]:
+                    price = float(response["tick"]["quote"])
+                    print(f"💰 Current {self.symbol} Price: ${price:.2f} (Source: Deriv)")
+                    return price
         except Exception as e:
-            print(f"⚠️ Error getting current price from Coinbase: {e}")
+            print(f"⚠️ Error getting current price from Deriv: {e}")
         
         return None
     
