@@ -30,3 +30,23 @@ async def _run_cycle(self):
             await self._process_signal(signal)
     else:
         print("ℹ️ Tidak ada sinyal valid")
+# ==========================================================
+# PASTIKAN KODE DI BAWAH INI ADA DI BARIS PALING BAWAH main.py
+# ==========================================================
+
+if __name__ == "__main__":
+    print("🔥 FILE MAIN.PY BERHASIL DIEKSEKUSI!")
+    print("🚀 MEMULAI EKSEKUSI BOT...")
+    
+    # Auto-restart wrapper
+    while True:
+        try:
+            asyncio.run(main())
+        except Exception as e:
+            print(f"❌ Bot crashed: {e}")
+            print("🔄 Restarting in 10 seconds...")
+            time.sleep(10)
+        else:
+            # Jika bot berhenti secara normal (misal karena timeout GitHub)
+            print("ℹ️ Bot berhenti secara normal.")
+            break
