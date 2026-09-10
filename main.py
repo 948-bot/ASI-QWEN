@@ -2,6 +2,7 @@ import asyncio
 import sys
 import signal
 import time
+import os
 from datetime import datetime
 
 from config import Config
@@ -28,11 +29,13 @@ class TradingBot:
     async def start(self):
         """Start the trading bot"""
         print("=" * 60)
-        print("🚀 XAUUSD/PAXG SIGNAL BOT DIMULAI")
+        print("🚀 XAUUSD SIGNAL BOT DIMULAI")
         print("=" * 60)
         print(f"Symbol: {self.config.PAXG_SYMBOL}")
         print(f"Timeframes: {', '.join(self.config.TIMEFRAMES)}")
         print(f"Update Interval: {self.config.UPDATE_INTERVAL}s")
+        print(f"MTF Confluence: {self.config.USE_MTF_CONFLUENCE}")
+        print(f"News Filter: {self.config.USE_NEWS_FILTER}")
         print("=" * 60)
         
         # Send startup notification
@@ -40,6 +43,8 @@ class TradingBot:
             "🚀 *BOT TRADING DIMULAI*\n\n"
             f"Symbol: {self.config.PAXG_SYMBOL}\n"
             f"Timeframes: {', '.join(self.config.TIMEFRAMES)}\n"
+            f"MTF Confluence: {self.config.USE_MTF_CONFLUENCE}\n"
+            f"News Filter: {self.config.USE_NEWS_FILTER}\n"
             f"Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
         
@@ -57,7 +62,7 @@ class TradingBot:
                 await asyncio.sleep(self.config.UPDATE_INTERVAL)
                 
             except KeyboardInterrupt:
-                print("\n⚠️ Bot dihentikan oleh user")
+                print("\n️ Bot dihentikan oleh user")
                 break
             except Exception as e:
                 error_msg = f"Error dalam cycle: {str(e)}"
@@ -75,7 +80,7 @@ class TradingBot:
         data = await self.fetcher.fetch_multiple_timeframes()
         
         if not data or all(df is None for df in data.values()):
-            print("⚠️ Tidak ada data, skip cycle ini")
+            print("️ Tidak ada data, skip cycle ini")
             return
         
         # Analyze data
@@ -93,7 +98,7 @@ class TradingBot:
             for signal in signals:
                 await self._process_signal(signal)
         else:
-            print("️ Tidak ada sinyal valid")
+            print("ℹ️ Tidak ada sinyal valid")
     
     async def _process_signal(self, signal):
         """Process and send a signal"""
@@ -103,7 +108,7 @@ class TradingBot:
         # Send to Telegram
         await self.notifier.send_signal(signal)
         
-        print(f" Signal {signal['type']} dikirim | Confidence: {signal['confidence']}%")
+        print(f" Signal {signal['type']} dikirim | Confidence: {signal['confidence']}% | MTF: {signal.get('mtf_trend', 'N/A')}")
     
     async def _periodic_tasks(self):
         """Run periodic maintenance tasks"""
@@ -131,7 +136,7 @@ class TradingBot:
     async def shutdown(self):
         """Graceful shutdown"""
         print("\n" + "=" * 60)
-        print("🛑 Bot sedang shutdown...")
+        print(" Bot sedang shutdown...")
         print("=" * 60)
         
         # Send shutdown notification
