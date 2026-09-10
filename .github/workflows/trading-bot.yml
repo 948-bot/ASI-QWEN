@@ -1,0 +1,159 @@
+name: XAUUSD Trading Bot 24/5
+
+on:
+  schedule:
+    # Jalankan setiap 5 jam (sebelum timeout 6 jam GitHub Actions)
+    - cron: '0 */5 * * 1-5'  # Senin-Jumat setiap 5 jam
+    - cron: '0 0 * * 6'       # Sabtu midnight
+  workflow_dispatch:
+    inputs:
+      force_restart:
+        description: 'Force restart bot'
+        required: false
+        default: 'false'
+  repository_dispatch:
+    types: [restart-bot]
+
+env:
+  PYTHON_VERSION: '3.10'
+  BOT_TIMEOUT: 17000  # 4.7 jam (sebelum 6 jam timeout)
+
+jobs:
+  trading-bot:
+    name: Run Trading Bot
+    runs-on: ubuntu-latest
+    timeout-minutes: 300  # 5 jam max
+    
+    steps:
+      - name: 📥 Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: 📦 Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          echo "✅ Dependencies installed"
+      
+      - name: 🔐 Setup Environment Variables
+        run: |
+          cat > .env << EOF
+          TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}
+          PAXG_SYMBOL=${{ vars.PAXG_SYMBOL || 'PAXGUSDT' }}
+          UPDATE_INTERVAL=${{ vars.UPDATE_INTERVAL || '60' }}
+          RISK_LEVEL=${{ vars.RISK_LEVEL || 'medium' }}
+          MAX_SIGNALS_PER_HOUR=${{ vars.MAX_SIGNALS_PER_HOUR || '10' }}
+          GITHUB_ACTIONS=true
+          GITHUB_RUN_ID=${{ github.run_id }}
+          GITHUB_REPOSITORY=${{ github.repository }}
+          EOF
+          echo "✅ Environment configured"
+      
+      - name: 📂 Setup Data Directory
+        run: |
+          mkdir -p data logs
+          echo "✅ Data directories created"
+      
+      - name: 🚀 Run Trading Bot
+        id: run_bot
+        continue-on-error: true
+        env:
+          PYTHONUNBUFFERED: 1
+        run: |
+          echo "🚀 Starting trading bot at $(date)"
+          timeout ${{ env.BOT_TIMEOUT }} python main.py 2>&1 | tee logs/bot.log || EXIT_CODE=$?
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          echo "✅ Bot execution completed"
+      
+      - name: 📊 Upload Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-logs-${{ github.run_id }}
+          path: |
+            logs/
+            data/
+          retention-days: 7
+      
+      - name: 🔄 Auto-Restart Bot
+        if: always() && github.event_name != 'workflow_dispatch'
+        run: |
+          echo "🔄 Triggering restart for continuous operation..."
+          python restart_helper.py
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: 📢 Notify on Completion
+        if: always()
+        run: |
+          python -c "
+          import requests
+          import os
+          from datetime import datetime
+          
+          token = '${{ secrets.TELEGRAM_BOT_TOKEN }}'
+          chat_id = '${{ secrets.TELEGRAM_CHAT_ID }}'
+          
+          status = '✅ Berhasil' if '${{ steps.run_bot.outputs.exit_code }}' == '0' else '⚠️ Restart'
+          message = f'''
+          🤖 *STATUS BOT TRADING*
+          
+          Status: {status}
+          Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+          Run ID: ${{ github.run_id }}
+          
+          Bot akan restart otomatis untuk operasi 24/5
+          '''
+          
+          try:
+              requests.post(
+                  f'https://api.telegram.org/bot{token}/sendMessage',
+                  data={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'},
+                  timeout=10
+              )
+          except Exception as e:
+              print(f'Notification error: {e}')
+          "
+      
+      - name: 🔄 Trigger Next Run
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // Schedule next run in 5 hours
+            const nextRun = new Date(Date.now() + 5 * 60 * 60 * 1000);
+            console.log(`Next scheduled run: ${nextRun.toISOString()}`);
+            
+            // Trigger workflow restart
+            await github.rest.repos.createDispatchEvent({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              event_type: 'restart-bot'
+            });
+
+  health-check:
+    name: Health Check
+    runs-on: ubuntu-latest
+    needs: trading-bot
+    if: always()
+    
+    steps:
+      - name: 🏥 Check Bot Health
+        run: |
+          echo "🏥 Performing health check..."
+          echo "Previous job status: ${{ needs.trading-bot.result }}"
+          
+          if [ "${{ needs.trading-bot.result }}" == "failure" ]; then
+            echo "❌ Bot failed, will restart on next schedule"
+          else
+            echo "✅ Bot running normally"
+          fi
