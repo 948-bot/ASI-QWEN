@@ -1,0 +1,110 @@
+name: Initial Setup
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/**'
+
+jobs:
+  setup:
+    name: Initial Workflow Setup
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+      
+      - name: 🔍 Verify Configuration
+        run: |
+          echo "🔍 Verifying GitHub Actions setup..."
+          echo "=================================="
+          echo "Repository: ${{ github.repository }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Event: ${{ github.event_name }}"
+          echo "Run ID: ${{ github.run_id }}"
+          echo "=================================="
+          
+          # Check if workflows exist
+          if [ -f ".github/workflows/trading-bot.yml" ]; then
+            echo "✅ trading-bot.yml found"
+          else
+            echo "❌ trading-bot.yml not found"
+            exit 1
+          fi
+          
+          if [ -f ".github/workflows/health-check.yml" ]; then
+            echo "✅ health-check.yml found"
+          else
+            echo "⚠️ health-check.yml not found"
+          fi
+          
+          echo "=================================="
+      
+      - name: 🔐 Check Secrets
+        run: |
+          echo "🔐 Checking secrets configuration..."
+          
+          if [ -n "${{ secrets.TELEGRAM_BOT_TOKEN }}" ]; then
+            echo "✅ TELEGRAM_BOT_TOKEN is set"
+          else
+            echo "⚠️ TELEGRAM_BOT_TOKEN is NOT set"
+            echo "   Go to: Settings → Secrets and variables → Actions"
+            echo "   Add: TELEGRAM_BOT_TOKEN"
+          fi
+          
+          if [ -n "${{ secrets.TELEGRAM_CHAT_ID }}" ]; then
+            echo "✅ TELEGRAM_CHAT_ID is set"
+          else
+            echo "⚠️ TELEGRAM_CHAT_ID is NOT set"
+            echo "   Go to: Settings → Secrets and variables → Actions"
+            echo "   Add: TELEGRAM_CHAT_ID"
+          fi
+      
+      - name: 📢 Send Setup Notification
+        run: |
+          python -c "
+          import requests
+          from datetime import datetime
+          
+          token = '${{ secrets.TELEGRAM_BOT_TOKEN }}'
+          chat_id = '${{ secrets.TELEGRAM_CHAT_ID }}'
+          
+          if not token or not chat_id:
+              print('⚠️ Telegram credentials not set - skipping notification')
+              exit(0)
+          
+          message = f'''
+          🚀 *BOT TRADING SETUP COMPLETE*
+          
+          Status: Siap berjalan
+          Waktu: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+          Repository: ${{ github.repository }}
+          
+          Bot akan berjalan otomatis sesuai schedule
+          Schedule: Setiap 5 jam (Senin-Jumat)
+          '''
+          
+          try:
+              requests.post(
+                  f'https://api.telegram.org/bot{token}/sendMessage',
+                  data={'chat_id': chat_id, 'text': message, 'parse_mode': 'Markdown'},
+                  timeout=10
+              )
+              print('✅ Setup notification sent')
+          except Exception as e:
+              print(f'Notification error: {e}')
+          "
+      
+      - name: ✅ Setup Complete
+        run: |
+          echo "=================================="
+          echo "✅ Initial setup complete!"
+          echo "=================================="
+          echo "Next steps:"
+          echo "1. Bot akan berjalan otomatis sesuai schedule"
+          echo "2. Cek tab 'Actions' untuk melihat workflow runs"
+          echo "3. Monitor Telegram untuk notifikasi"
+          echo "=================================="
