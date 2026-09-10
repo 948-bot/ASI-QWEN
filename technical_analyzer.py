@@ -61,11 +61,11 @@ class TechnicalAnalyzer:
         # Liquidity Sweep: Harga menembus swing high sebelumnya, tapi close di bawahnya (Bearish Sweep)
         df['bearish_sweep'] = (df['high'] > df['high'].shift(1)) & (df['close'] < df['high'].shift(1))
         
-        # Fair Value Gap (FVG) Bullish: Candle ke-3 high < Candle ke-1 low
-        df['fvg_bullish'] = (df['high'].shift(2) < df['low'])
+        # Fair Value Gap (FVG) Bullish: Low candle saat ini > High candle 2 periode lalu (Celah Imbalance naik)
+        df['fvg_bullish'] = (df['low'] > df['high'].shift(2))
         
-        # Fair Value Gap (FVG) Bearish: Candle ke-3 low > Candle ke-1 high
-        df['fvg_bearish'] = (df['low'].shift(2) > df['high'])
+        # Fair Value Gap (FVG) Bearish: High candle saat ini < Low candle 2 periode lalu (Celah Imbalance turun)
+        df['fvg_bearish'] = (df['high'] < df['low'].shift(2))
         
         return df
 
