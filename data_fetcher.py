@@ -19,7 +19,7 @@ class DataFetcher:
     async def fetch_klines(self, interval='5m', limit=100):
         cache_key = f"DERIV_{self.symbol}_{interval}"
         
-        if cache_key in self.last_fetch and (time.time() - self.last_fetch[cache_key] < 30):
+        if cache_key in self.last_fetch and (time.time() - self.last_fetch[cache_key] < 15): # Dipercepat cache-nya jadi 15 detik
             return self.cache.get(cache_key)
         
         granularity = 300 if interval in ['5m', '5min'] else 900
@@ -33,12 +33,8 @@ class DataFetcher:
         return self.cache.get(cache_key)
     
     async def fetch_dxy_data(self):
-        """
-        ASI UPGRADE: Mengambil data US Dollar Index (DXY) dari Yahoo Finance
-        untuk analisis korelasi intermarket.
-        """
         cache_key = "DXY_15m"
-        if cache_key in self.last_fetch and (time.time() - self.last_fetch[cache_key] < 60):
+        if cache_key in self.last_fetch and (time.time() - self.last_fetch[cache_key] < 45):
             return self.cache.get(cache_key)
 
         try:
@@ -54,7 +50,6 @@ class DataFetcher:
                         if df is not None and not df.empty:
                             self.cache[cache_key] = df
                             self.last_fetch[cache_key] = time.time()
-                            print(f"✅ Data DXY (Indeks Dolar) berhasil diambil untuk korelasi makro")
                             return df
         except Exception as e:
             print(f"⚠️ Gagal mengambil data DXY: {e}")
@@ -103,21 +98,28 @@ class DataFetcher:
     
     def _parse_deriv_candles(self, candles_data, granularity):
         if not candles_data: return None
-        candles_data.reverse()
+        
+        # Deriv biasanya mengirim data dari yang terlama ke terbaru. 
+        # Jika diurutkan ke bawah, pastikan indeks terakhir adalah candle yang sedang berjalan (live).
         df = pd.DataFrame(candles_data)
-        df = df.rename(columns={'epoch': 'open_time'})
+        df = df.rename(columns={'epoch': 'open_time', 'open': 'open', 'high': 'high', 'low': 'low', 'close': 'close'})
         df['open_time'] = pd.to_datetime(df['open_time'], unit='s')
         df['close_time'] = df['open_time'] + pd.Timedelta(seconds=granularity)
-        if 'volume' not in df.columns: df['volume'] = 0
+        
+        if 'volume' not in df.columns: 
+            df['volume'] = 0
+            
         for col in ['open', 'high', 'low', 'close', 'volume']:
             df[col] = pd.to_numeric(df[col], errors='coerce')
-        return df.dropna()
+            
+        df = df.dropna().sort_values('open_time').reset_index(drop=True)
+        return df
     
     async def fetch_multiple_timeframes(self):
         tasks = [
             self.fetch_klines(interval='5m', limit=100),
             self.fetch_klines(interval='15m', limit=100),
-            self.fetch_dxy_data() # Fetch DXY bersamaan
+            self.fetch_dxy_data()
         ]
         results = await asyncio.gather(*tasks)
         return {'5m': results[0], '15m': results[1], 'dxy': results[2]}
